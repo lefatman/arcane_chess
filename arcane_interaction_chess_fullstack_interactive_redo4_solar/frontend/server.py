@@ -23,6 +23,7 @@ from dataclasses import fields, is_dataclass
 import json
 import os
 import sys
+import threading
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
@@ -368,6 +369,8 @@ class ServerEngine:
         return {"before": before, "after": after, "diff": d, "meta": meta}
 
     def undo(self) -> Dict[str, Any]:
+        if not getattr(self.game, "_stack", None):
+            raise ValueError("No moves to undo")
         before = snapshot(self.game)
         undone_move = self.game.last_move
         undone_meta = None
@@ -396,6 +399,7 @@ class _State:
         self.pending_move = None
 
 STATE = _State()
+STATE_LOCK = threading.RLock()
 
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
@@ -442,13 +446,19 @@ class Handler(SimpleHTTPRequestHandler):
                 _json_write(self, 200, {"ok": True, "defs": _defs()})
                 return
             if self.path.startswith("/api/state"):
-                _json_write(self, 200, {"ok": True, "state": STATE.engine.state()})
+                with STATE_LOCK:
+                    state = STATE.engine.state()
+                _json_write(self, 200, {"ok": True, "state": state})
                 return
             if self.path.startswith("/api/legal"):
-                _json_write(self, 200, {"ok": True, "moves": STATE.engine.legal_moves()})
+                with STATE_LOCK:
+                    moves = STATE.engine.legal_moves()
+                _json_write(self, 200, {"ok": True, "moves": moves})
                 return
             if self.path.startswith("/api/pending"):
-                _json_write(self, 200, {"ok": True, "pending": STATE.pending})
+                with STATE_LOCK:
+                    pending = STATE.pending
+                _json_write(self, 200, {"ok": True, "pending": pending})
                 return
         except Exception as e:
             _bad(self, str(e), 500)
@@ -467,226 +477,216 @@ class Handler(SimpleHTTPRequestHandler):
 
         try:
             if self.path.startswith("/api/reset"):
-                STATE.engine = ServerEngine.standard_demo_game()
-                STATE.pending = None
-                STATE.pending_move = None
-                _json_write(self, 200, {"ok": True, "state": STATE.engine.state()})
+                with STATE_LOCK:
+                    STATE.engine = ServerEngine.standard_demo_game()
+                    STATE.pending = None
+                    STATE.pending_move = None
+                    state = STATE.engine.state()
+                _json_write(self, 200, {"ok": True, "state": state})
                 return
 
             if self.path.startswith("/api/newgame"):
                 white = _parse_config(body.get("white") or {})
                 black = _parse_config(body.get("black") or {})
                 seed = int(body.get("rng_seed", 1337))
-                STATE.engine = ServerEngine(white=white, black=black, rng_seed=seed)
-                STATE.pending = None
-                STATE.pending_move = None
-                _json_write(self, 200, {"ok": True, "state": STATE.engine.state()})
+                with STATE_LOCK:
+                    STATE.engine = ServerEngine(white=white, black=black, rng_seed=seed)
+                    STATE.pending = None
+                    STATE.pending_move = None
+                    state = STATE.engine.state()
+                _json_write(self, 200, {"ok": True, "state": state})
                 return
 
             if self.path.startswith("/api/apply"):
-                if STATE.pending is not None:
-                    _bad(self, "Decision pending: resolve /api/decide or /api/cancel")
-                    return
                 mv = body.get("move")
                 if not isinstance(mv, dict):
                     _bad(self, "Missing move dict")
                     return
-                STATE.engine.decisions.clear()
-                try:
-                    res = STATE.engine.apply(mv)
-                    _json_write(self, 200, {"ok": True, "result": res})
-                    return
-                except ValueError as e:
-                    _bad(self, str(e), 400)
-                    return
-                except NeedDecision as nd:
-                    pid = secrets.token_urlsafe(10)
-                    kind = str(nd.payload.get("kind"))
-                    # Special case: Redo rewinds the timeline first, so there is no "original move" to re-apply.
-                    if kind == "redo_replay":
-                        STATE.pending_move = None
+                with STATE_LOCK:
+                    if STATE.pending is not None:
+                        _bad(self, "Decision pending: resolve /api/decide or /api/cancel")
+                        return
+                    STATE.engine.decisions.clear()
+                    try:
+                        res = STATE.engine.apply(mv)
+                    except ValueError as e:
+                        _bad(self, str(e), 400)
+                        return
+                    except NeedDecision as nd:
+                        pid = secrets.token_urlsafe(10)
+                        kind = str(nd.payload.get("kind"))
+                        STATE.pending_move = None if kind == "redo_replay" else mv
+                        STATE.pending = {"id": pid, **nd.payload}
+                        pending = STATE.pending
+                        state = STATE.engine.state()
                     else:
-                        STATE.pending_move = mv
-                    STATE.pending = {"id": pid, **nd.payload}
-                    _json_write(self, 200, {"ok": True, "pending": STATE.pending, "state": STATE.engine.state()})
-                    return
+                        _json_write(self, 200, {"ok": True, "result": res})
+                        return
+                _json_write(self, 200, {"ok": True, "pending": pending, "state": state})
+                return
 
             if self.path.startswith("/api/decide"):
                 pid = body.get("id")
                 choice = body.get("choice")
-                if STATE.pending is None:
-                    _bad(self, "No pending decision")
-                    return
-                if str(pid) != str(STATE.pending.get("id")):
-                    _bad(self, "Pending decision id mismatch")
-                    return
+                with STATE_LOCK:
+                    if STATE.pending is None:
+                        _bad(self, "No pending decision")
+                        return
+                    if str(pid) != str(STATE.pending.get("id")):
+                        _bad(self, "Pending decision id mismatch")
+                        return
 
-                kind = str(STATE.pending.get("kind"))
-                STATE.engine.decisions.choices[kind] = choice
-                try:
-                    # Redo replay is a direct move choice from the rewound state.
-                    if STATE.pending_move is None and kind == "redo_replay":
-                        g = STATE.engine.game
-                        # Find the chosen move by UCI.
-                        chosen = None
-                        for m in g.legal_moves(g.side_to_move):
-                            if move_to_uci(m) == str(choice):
-                                chosen = m
-                                break
-                        if chosen is None:
-                            _bad(self, "Invalid redo replay choice")
+                    kind = str(STATE.pending.get("kind"))
+                    STATE.engine.decisions.choices[kind] = choice
+                    try:
+                        if STATE.pending_move is None and kind == "redo_replay":
+                            g = STATE.engine.game
+                            chosen = None
+                            for m in g.legal_moves(g.side_to_move):
+                                if move_to_uci(m) == str(choice):
+                                    chosen = m
+                                    break
+                            if chosen is None:
+                                _bad(self, "Invalid redo replay choice")
+                                return
+
+                            pr = getattr(g, "_pending_redo", None)
+                            if isinstance(pr, dict):
+                                for e in reversed(getattr(g, "transient_effects", []) or []):
+                                    if e.get("type") == "redo_pending" and int(e.get("spent_uid", -1)) == int(pr.get("spent_uid", -2)):
+                                        e["type"] = "redo"
+                                        e["replay"] = chosen
+                                        break
+
+                            mv_dict = move_to_dict(chosen)
+                            res = STATE.engine.apply(mv_dict)
+                            STATE.pending = None
+                            STATE.pending_move = None
+                            if hasattr(g, "_pending_redo"):
+                                setattr(g, "_pending_redo", None)
+                            _json_write(self, 200, {"ok": True, "result": res})
                             return
 
-                        # Upgrade the transient redo_pending entry to a concrete redo effect (and preserve effects across this push).
-                        pr = getattr(g, "_pending_redo", None)
-                        if isinstance(pr, dict):
-                            for e in reversed(getattr(g, "transient_effects", []) or []):
-                                if e.get("type") == "redo_pending" and int(e.get("spent_uid", -1)) == int(pr.get("spent_uid", -2)):
-                                    e["type"] = "redo"
-                                    e["replay"] = chosen
-                                    break
-
-                        mv_dict = move_to_dict(chosen)
-                        res = STATE.engine.apply(mv_dict)
-
-                        # success: clear pending and the redo marker
+                        if STATE.pending_move is None:
+                            _bad(self, "No pending move to apply")
+                            return
+                        res = STATE.engine.apply(STATE.pending_move)
                         STATE.pending = None
                         STATE.pending_move = None
-                        if hasattr(g, "_pending_redo"):
-                            setattr(g, "_pending_redo", None)
                         _json_write(self, 200, {"ok": True, "result": res})
                         return
-
-                    # Default decision flow: re-apply the pending move.
-                    if STATE.pending_move is None:
-                        _bad(self, "No pending move to apply")
+                    except ValueError as e:
+                        _bad(self, str(e), 400)
                         return
-                    res = STATE.engine.apply(STATE.pending_move)
-                    # success: clear pending and choices
-                    STATE.pending = None
-                    STATE.pending_move = None
-                    _json_write(self, 200, {"ok": True, "result": res})
-                    return
-                except ValueError as e:
-                    _bad(self, str(e), 400)
-                    return
-                except NeedDecision as nd:
-                    # chain: keep same id and move, but update prompt/options
-                    STATE.pending.update({k: v for k, v in nd.payload.items() if k != "kind"})
-                    STATE.pending["kind"] = nd.payload.get("kind")
-                    # If we were in redo replay and the replay move itself needs a further decision (e.g., Block Path),
-                    # convert this into the standard pending-move flow by setting pending_move to the chosen replay move.
-                    if STATE.pending_move is None and kind == "redo_replay":
-                        # Note: chosen move dict was computed above; reconstruct from choice.
-                        g = STATE.engine.game
-                        for m in g.legal_moves(g.side_to_move):
-                            if move_to_uci(m) == str(choice):
-                                STATE.pending_move = move_to_dict(m)
-                                break
-                    _json_write(self, 200, {"ok": True, "pending": STATE.pending, "state": STATE.engine.state()})
-                    return
+                    except NeedDecision as nd:
+                        STATE.pending.update({k: v for k, v in nd.payload.items() if k != "kind"})
+                        STATE.pending["kind"] = nd.payload.get("kind")
+                        if STATE.pending_move is None and kind == "redo_replay":
+                            g = STATE.engine.game
+                            for m in g.legal_moves(g.side_to_move):
+                                if move_to_uci(m) == str(choice):
+                                    STATE.pending_move = move_to_dict(m)
+                                    break
+                        pending = STATE.pending
+                        state = STATE.engine.state()
+                _json_write(self, 200, {"ok": True, "pending": pending, "state": state})
+                return
 
             if self.path.startswith("/api/cancel"):
-                STATE.pending = None
-                STATE.pending_move = None
-                STATE.engine.decisions.clear()
-                _json_write(self, 200, {"ok": True, "state": STATE.engine.state()})
+                with STATE_LOCK:
+                    STATE.pending = None
+                    STATE.pending_move = None
+                    STATE.engine.decisions.clear()
+                    state = STATE.engine.state()
+                _json_write(self, 200, {"ok": True, "state": state})
                 return
 
             if self.path.startswith("/api/undo"):
-                # Undo cancels any pending prompts.
-                STATE.pending = None
-                STATE.pending_move = None
-                STATE.engine.decisions.clear()
-                res = STATE.engine.undo()
+                with STATE_LOCK:
+                    STATE.pending = None
+                    STATE.pending_move = None
+                    STATE.engine.decisions.clear()
+                    try:
+                        res = STATE.engine.undo()
+                    except ValueError as e:
+                        _bad(self, str(e), 400)
+                        return
                 _json_write(self, 200, {"ok": True, "result": res})
                 return
 
             if self.path.startswith("/api/solar_topup"):
-                if STATE.pending is not None:
-                    _bad(self, "Decision pending: resolve before using Solar Necklace")
-                    return
-                # Solar Necklace: top up a consumable ability up to 3 times per match.
-                # Treat as a match-level action (does not consume a ply).
-                #
-                # payload:
-                #   {"kind":"redo","uid":123}  -> +1 redo charge (up to max) for that piece uid
-                #   {"kind":"necro"}            -> +1 necro pool (up to max) for side-to-move
                 kind = str(body.get("kind", "redo")).lower()
                 uid = body.get("uid")
-
-                g = STATE.engine.game
-                st = g.arcane_state
-                c = g.side_to_move
-                cfg = g.player_config[c]
-
-                if not cfg.has_item(ItemId.SOLAR_NECKLACE):
-                    _bad(self, "Solar Necklace not equipped")
-                    return
-                if st.solar_uses[c] <= 0:
-                    _bad(self, "No Solar uses remaining")
-                    return
-
-                before = snapshot(g)
-
-                # Clear transient effects and log this action for UI.
-                try:
-                    g.transient_effects.clear()
-                except Exception:
-                    pass
-
-                if kind == "necro":
-                    # Must have Necromancer equipped (pool/max > 0)
-                    if int(st.necro_max[c]) <= 0:
-                        _bad(self, "Necromancer is not equipped for this side")
+                with STATE_LOCK:
+                    if STATE.pending is not None:
+                        _bad(self, "Decision pending: resolve before using Solar Necklace")
                         return
-                    if int(st.necro_pool[c]) >= int(st.necro_max[c]):
-                        _bad(self, "Necromancer pool already full")
-                        return
-                    # Apply a monotonic bonus so the top-up survives Redo rewinds.
-                    st.necro_bonus[c] = int(st.necro_bonus.get(c, 0)) + 1
-                    st.necro_max[c] = int(st.necro_max[c]) + 1
-                    st.necro_pool[c] = int(st.necro_pool[c]) + 1
-                    g.transient_effects.append({"type": "solar_topup", "kind": "necro", "side": "WHITE" if c is Color.WHITE else "BLACK"})
-                else:
-                    if uid is None:
-                        _bad(self, "uid required for redo topup")
-                        return
-                    uid = int(uid)
-                    # Ensure piece exists and belongs to the side-to-move
-                    p = g.board._pieces.get(next((sq for sq, pp in g.board._pieces.items() if int(pp.uid) == uid), -1))
-                    # Above lookup is awkward; do a safe scan.
-                    if p is None:
-                        for pp in g.board._pieces.values():
-                            if int(pp.uid) == uid:
-                                p = pp
-                                break
-                    if p is None or p.color is not c:
-                        _bad(self, "Invalid target piece")
-                        return
-                    if st.redo_max.get(uid, 0) <= 0:
-                        _bad(self, "Target piece has no Redo charges")
-                        return
-                    if st.redo_charges.get(uid, 0) >= st.redo_max.get(uid, 0):
-                        _bad(self, "Redo charges already full")
-                        return
-                    st.redo_charges[uid] = min(int(st.redo_charges.get(uid, 0)) + 1, int(st.redo_max.get(uid, 0)))
-                    g.transient_effects.append({"type": "solar_topup", "kind": "redo", "side": "WHITE" if c is Color.WHITE else "BLACK", "uid": uid})
 
-                # consume a use
-                st.solar_uses[c] = int(st.solar_uses[c]) - 1
+                    g = STATE.engine.game
+                    st = g.arcane_state
+                    c = g.side_to_move
+                    cfg = g.player_config[c]
 
-                after = snapshot(g)
-                d = snapshot_diff(before, after)
-                meta = {
-                    "applied": None,
-                    "applied_notation": None,
-                    "result_last_move": after.get("last_move"),
-                    "result_last_notation": STATE.engine._notation_for_last_move(),
-                    "effects": STATE.engine._gather_effects(),
-                    "check": after.get("check"),
-                    "checkmate": after.get("checkmate"),
-                }
+                    if not cfg.has_item(ItemId.SOLAR_NECKLACE):
+                        _bad(self, "Solar Necklace not equipped")
+                        return
+                    if st.solar_uses[c] <= 0:
+                        _bad(self, "No Solar uses remaining")
+                        return
+
+                    before = snapshot(g)
+                    try:
+                        g.transient_effects.clear()
+                    except Exception:
+                        pass
+
+                    if kind == "necro":
+                        if int(st.necro_max[c]) <= 0:
+                            _bad(self, "Necromancer is not equipped for this side")
+                            return
+                        if int(st.necro_pool[c]) >= int(st.necro_max[c]):
+                            _bad(self, "Necromancer pool already full")
+                            return
+                        st.necro_bonus[c] = int(st.necro_bonus.get(c, 0)) + 1
+                        st.necro_max[c] = int(st.necro_max[c]) + 1
+                        st.necro_pool[c] = int(st.necro_pool[c]) + 1
+                        g.transient_effects.append({"type": "solar_topup", "kind": "necro", "side": "WHITE" if c is Color.WHITE else "BLACK"})
+                    else:
+                        if uid is None:
+                            _bad(self, "uid required for redo topup")
+                            return
+                        uid = int(uid)
+                        p = g.board._pieces.get(next((sq for sq, pp in g.board._pieces.items() if int(pp.uid) == uid), -1))
+                        if p is None:
+                            for pp in g.board._pieces.values():
+                                if int(pp.uid) == uid:
+                                    p = pp
+                                    break
+                        if p is None or p.color is not c:
+                            _bad(self, "Invalid target piece")
+                            return
+                        if st.redo_max.get(uid, 0) <= 0:
+                            _bad(self, "Target piece has no Redo charges")
+                            return
+                        if st.redo_charges.get(uid, 0) >= st.redo_max.get(uid, 0):
+                            _bad(self, "Redo charges already full")
+                            return
+                        st.redo_charges[uid] = min(int(st.redo_charges.get(uid, 0)) + 1, int(st.redo_max.get(uid, 0)))
+                        g.transient_effects.append({"type": "solar_topup", "kind": "redo", "side": "WHITE" if c is Color.WHITE else "BLACK", "uid": uid})
+
+                    st.solar_uses[c] = int(st.solar_uses[c]) - 1
+
+                    after = snapshot(g)
+                    d = snapshot_diff(before, after)
+                    meta = {
+                        "applied": None,
+                        "applied_notation": None,
+                        "result_last_move": after.get("last_move"),
+                        "result_last_notation": STATE.engine._notation_for_last_move(),
+                        "effects": STATE.engine._gather_effects(),
+                        "check": after.get("check"),
+                        "checkmate": after.get("checkmate"),
+                    }
                 _json_write(self, 200, {"ok": True, "result": {"before": before, "after": after, "diff": d, "meta": meta}})
                 return
 
@@ -695,6 +695,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         self.send_error(HTTPStatus.NOT_FOUND, "No such endpoint")
+
 
 
 def main() -> int:

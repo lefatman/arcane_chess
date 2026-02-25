@@ -1,0 +1,21 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: arcane_interaction_chess_fullstack_interactive_redo4_solar
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run backend tests
+        run: python backend/scripts/run_tests.py
+      - name: API concurrency stress
+        run: python frontend/scripts/concurrency_stress.py --seed 1337 --rounds 40 --apply-workers 3 --undo-workers 3
