@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import fields, is_dataclass
 from typing import Iterable, List, Optional, TYPE_CHECKING
 
 from .types import Color
@@ -80,6 +81,8 @@ class Game:
         mover = self.board.piece_at(move.from_sq)
         if mover is None:
             raise ValueError("No piece on from-square")
+        if mover.color is not self.side_to_move:
+            raise ValueError("Wrong side to move")
 
         self.emit(MoveWillApply(move=move, mover=mover))
         undo = move.apply(self)
@@ -88,6 +91,25 @@ class Game:
 
         self._after_apply(undo)
         self.emit(MoveApplied(move=move, mover=undo.mover, captured=undo.captured_piece))
+
+    @staticmethod
+    def moves_equal(left: Move, right: Move) -> bool:
+        if left.__class__ is not right.__class__:
+            return False
+        if not (is_dataclass(left) and is_dataclass(right)):
+            return False
+        for f in fields(left):
+            if getattr(left, f.name) != getattr(right, f.name):
+                return False
+        return True
+
+    def push_checked(self, move: Move) -> None:
+        legal = self.legal_moves(self.side_to_move)
+        for candidate in legal:
+            if self.moves_equal(candidate, move):
+                self.push(candidate)
+                return
+        raise ValueError("Illegal move")
 
     def pop(self) -> None:
         undo = self._stack.pop()
