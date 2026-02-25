@@ -19,6 +19,7 @@ Then open:
 from __future__ import annotations
 
 import argparse
+from dataclasses import fields, is_dataclass
 import json
 import os
 import sys
@@ -325,7 +326,27 @@ class ServerEngine:
     def apply(self, move_dict: Dict[str, Any]) -> Dict[str, Any]:
         pre_len = len(getattr(self.game, "_stack", []))
         before = snapshot(self.game)
-        m = dict_to_move(move_dict)
+        requested = dict_to_move(move_dict)
+
+        legal = self.game.legal_moves(self.game.side_to_move)
+        m = None
+        if is_dataclass(requested):
+            for candidate in legal:
+                if candidate.__class__ is not requested.__class__:
+                    continue
+                if not is_dataclass(candidate):
+                    continue
+                matches = True
+                for f in fields(candidate):
+                    if getattr(candidate, f.name) != getattr(requested, f.name):
+                        matches = False
+                        break
+                if matches:
+                    m = candidate
+                    break
+        if m is None:
+            raise ValueError("Illegal move")
+
         applied_notation = {"uci": move_to_uci(m), "san": to_san(self.game, m)}
         try:
             self.game.push(m)
@@ -475,6 +496,9 @@ class Handler(SimpleHTTPRequestHandler):
                     res = STATE.engine.apply(mv)
                     _json_write(self, 200, {"ok": True, "result": res})
                     return
+                except ValueError as e:
+                    _bad(self, str(e), 400)
+                    return
                 except NeedDecision as nd:
                     pid = secrets.token_urlsafe(10)
                     kind = str(nd.payload.get("kind"))
@@ -542,6 +566,9 @@ class Handler(SimpleHTTPRequestHandler):
                     STATE.pending = None
                     STATE.pending_move = None
                     _json_write(self, 200, {"ok": True, "result": res})
+                    return
+                except ValueError as e:
+                    _bad(self, str(e), 400)
                     return
                 except NeedDecision as nd:
                     # chain: keep same id and move, but update prompt/options
