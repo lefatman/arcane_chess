@@ -32,6 +32,33 @@ def _load_frontend_server_module():
 
 
 class TestIllegalInputRejected(unittest.TestCase):
+    def _post_json(self, url: str, payload: dict):
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = json.loads(exc.read().decode("utf-8"))
+            return int(exc.code), body
+
+    def _get_json(self, url: str):
+        req = urllib.request.Request(url, method="GET")
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8")
+            try:
+                payload = json.loads(body)
+            except json.JSONDecodeError:
+                payload = {"raw": body}
+            return int(exc.code), payload
+
     def _start_server(self, server_module):
         server_module.STATE.engine = server_module.ServerEngine.standard_demo_game()
         server_module.STATE.pending = None
@@ -73,6 +100,27 @@ class TestIllegalInputRejected(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Illegal move"):
             engine.apply({"kind": "normal", "from_alg": "e2", "to_alg": "e4", "flags": ["bogus"]})
 
+    def test_server_engine_undo_empty_stack_raises_value_error(self):
+        server_module = _load_frontend_server_module()
+        engine = server_module.ServerEngine.standard_demo_game()
+
+        with self.assertRaisesRegex(ValueError, "No moves to undo"):
+            engine.undo()
+
+    def test_server_engine_undo_reverts_last_move(self):
+        server_module = _load_frontend_server_module()
+        engine = server_module.ServerEngine.standard_demo_game()
+
+        move = engine.legal_moves()[0]
+        applied = engine.apply(move)
+        self.assertEqual(applied["meta"]["applied"]["from_alg"], move["from_alg"])
+        self.assertEqual(applied["meta"]["applied"]["to_alg"], move["to_alg"])
+
+        undone = engine.undo()
+        self.assertIsNone(undone["after"]["last_move"])
+        self.assertEqual(undone["meta"]["undone"]["move"]["from_alg"], move["from_alg"])
+        self.assertEqual(undone["meta"]["undone"]["move"]["to_alg"], move["to_alg"])
+
     def test_api_apply_returns_400_for_illegal_input(self):
         server_module = _load_frontend_server_module()
         httpd, thread = self._start_server(server_module)
@@ -89,6 +137,50 @@ class TestIllegalInputRejected(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError) as exc:
                 urllib.request.urlopen(req)
             self.assertEqual(exc.exception.code, 400)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=2)
+
+    def test_api_undo_empty_returns_400_with_error_payload(self):
+        server_module = _load_frontend_server_module()
+        httpd, thread = self._start_server(server_module)
+
+        try:
+            status, body = self._post_json(f"http://127.0.0.1:{httpd.server_port}/api/undo", {})
+            self.assertEqual(status, 400)
+            self.assertEqual(body.get("ok"), False)
+            self.assertIsInstance(body.get("error"), str)
+            self.assertEqual(body.get("error"), "No moves to undo")
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=2)
+
+    def test_api_undo_after_apply_returns_200_with_result(self):
+        server_module = _load_frontend_server_module()
+        httpd, thread = self._start_server(server_module)
+
+        try:
+            base = f"http://127.0.0.1:{httpd.server_port}"
+            legal_status, legal_body = self._get_json(f"{base}/api/legal")
+            self.assertEqual(legal_status, 200)
+            self.assertTrue(legal_body.get("ok"))
+            move = legal_body["moves"][0]
+
+            apply_status, apply_body = self._post_json(
+                f"{base}/api/apply",
+                {"move": move},
+            )
+            self.assertEqual(apply_status, 200)
+            self.assertTrue(apply_body.get("ok"))
+
+            status, body = self._post_json(f"{base}/api/undo", {})
+            self.assertEqual(status, 200)
+            self.assertTrue(body.get("ok"))
+            self.assertIn("result", body)
+            self.assertEqual(body["result"]["meta"]["undone"]["move"]["from_alg"], move["from_alg"])
+            self.assertEqual(body["result"]["meta"]["undone"]["move"]["to_alg"], move["to_alg"])
         finally:
             httpd.shutdown()
             httpd.server_close()

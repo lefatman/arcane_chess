@@ -408,7 +408,7 @@ class ServerEngine:
         return {"before": before, "after": after, "diff": d, "meta": meta}
 
     def undo(self) -> Dict[str, Any]:
-        if not getattr(self.game, "_stack", None):
+        if not self.game._stack:
             raise ValueError("No moves to undo")
         before = snapshot(self.game)
         undone_move = self.game.last_move
