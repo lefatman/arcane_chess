@@ -54,3 +54,14 @@ PYTHONPATH=backend python -m arcane_interaction_chess play --human white --depth
 ```bash
 python backend/scripts/run_tests.py
 ```
+
+### Benchmarks (hot-path tracking)
+From the repo root:
+```bash
+PYTHONPATH=backend python backend/scripts/benchmark_hotpaths.py
+```
+
+To run periodic regression checks against `backend/scripts/benchmark_thresholds.json` (recommended on a schedule, not per-PR due to machine noise):
+```bash
+PYTHONPATH=backend python backend/scripts/benchmark_hotpaths.py --check-thresholds
+```

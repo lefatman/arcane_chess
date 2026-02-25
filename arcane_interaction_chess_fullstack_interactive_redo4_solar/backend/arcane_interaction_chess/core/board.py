@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, Iterator, List, Optional
 
 from .piece import Piece
 from .types import Color, sq_name
@@ -26,8 +26,14 @@ class Board:
         p.pos = to_sq
         self._pieces[to_sq] = p
 
+    def iter_pieces_of(self, color: Color) -> Iterator[Piece]:
+        for square in tuple(self._pieces):
+            piece = self._pieces.get(square)
+            if piece is not None and piece.color is color:
+                yield piece
+
     def pieces_of(self, color: Color) -> List[Piece]:
-        return [p for p in self._pieces.values() if p.color is color]
+        return list(self.iter_pieces_of(color))
 
     def king_of(self, color: Color) -> King:
         for p in self._pieces.values():
