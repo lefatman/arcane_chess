@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import fields, is_dataclass
 import json
+import logging
 import os
 import socket
 import sys
@@ -31,6 +32,9 @@ from socketserver import ThreadingMixIn
 from pathlib import Path
 from typing import Any, Dict, Optional, List
 import secrets
+
+
+LOGGER = logging.getLogger("arcane.frontend.server")
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -93,7 +97,7 @@ def _json_read(
         return {}
     try:
         return json.loads(raw.decode("utf-8"))
-    except Exception as e:
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as e:
         raise ValueError(f"Invalid JSON: {e}")
 
 
@@ -308,8 +312,9 @@ class InteractiveDecisions:
             if isinstance(undone, list) and undone:
                 try:
                     ctx["undone_uci"] = [move_to_uci(m) for m in undone]
-                except Exception:
-                    pass
+                except (TypeError, ValueError, KeyError):
+                    ctx["undone_uci"] = []
+                    ctx["undone_uci_error"] = "invalid_undone_payload"
         self._need(k, "Redo triggered: choose an alternate replay move", opts, ctx)
 
 
@@ -354,8 +359,10 @@ class ServerEngine:
                 try:
                     ee["undone_uci"] = [move_to_uci(m) for m in ee["undone"] if m is not None]
                     ee["undone"] = [move_to_dict(m) for m in ee["undone"] if m is not None]
-                except Exception:
-                    pass
+                except (TypeError, ValueError, KeyError):
+                    ee["undone_uci"] = []
+                    ee["undone"] = []
+                    ee["undone_error"] = "invalid_effect_undone_payload"
             out.append(ee)
         if getattr(self.game, "_stack", None):
             last_undo = self.game._stack[-1]
@@ -499,8 +506,12 @@ class Handler(SimpleHTTPRequestHandler):
                     pending = STATE.pending
                 _json_write(self, 200, {"ok": True, "pending": pending})
                 return
-        except Exception as e:
+        except (TypeError, ValueError, KeyError) as e:
             _bad(self, str(e), 500)
+            return
+        except Exception:
+            LOGGER.exception("api_get_unhandled", extra={"path": self.path})
+            _bad(self, "Internal server error", 500)
             return
 
         self.send_error(HTTPStatus.NOT_FOUND, "No such endpoint")
@@ -533,8 +544,12 @@ class Handler(SimpleHTTPRequestHandler):
             else:
                 _bad(self, msg, 400)
             return
-        except Exception as e:
+        except (TypeError, ValueError) as e:
             _bad(self, f"Invalid JSON: {e}")
+            return
+        except Exception:
+            LOGGER.exception("json_read_unhandled", extra={"path": self.path})
+            _bad(self, "Invalid JSON", 400)
             return
 
         try:
@@ -699,8 +714,9 @@ class Handler(SimpleHTTPRequestHandler):
                     before = snapshot(g)
                     try:
                         g.transient_effects.clear()
-                    except Exception:
-                        pass
+                    except (AttributeError, TypeError) as e:
+                        _bad(self, f"Unable to clear transient effects: {e}", 500)
+                        return
 
                     if kind == "necro":
                         if int(st.necro_max[c]) <= 0:
@@ -752,8 +768,12 @@ class Handler(SimpleHTTPRequestHandler):
                 _json_write(self, 200, {"ok": True, "result": {"before": before, "after": after, "diff": d, "meta": meta}})
                 return
 
-        except Exception as e:
+        except (TypeError, ValueError, KeyError) as e:
             _bad(self, str(e), 500)
+            return
+        except Exception:
+            LOGGER.exception("api_post_unhandled", extra={"path": self.path})
+            _bad(self, "Internal server error", 500)
             return
 
         self.send_error(HTTPStatus.NOT_FOUND, "No such endpoint")

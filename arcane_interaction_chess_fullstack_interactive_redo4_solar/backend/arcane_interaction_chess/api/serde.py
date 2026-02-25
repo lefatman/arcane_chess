@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import logging
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 from ..core.types import Color, sq_name, FILES
@@ -15,10 +16,13 @@ from ..core.moves import (
 # Arcane move
 try:
     from ..arcane.moves import RemoteCaptureMove  # type: ignore
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     RemoteCaptureMove = None  # type: ignore
 
 from ..core import pieces as core_pieces
+
+
+LOGGER = logging.getLogger("arcane.api.serde")
 
 
 _PIECE_NAME_TO_CLASS: Dict[str, Type] = {
@@ -177,15 +181,18 @@ def snapshot(game) -> Dict[str, Any]:
         in_check = bool(game.in_check(stm))
         out["check"] = in_check
         out["checkmate"] = bool(in_check and len(game.legal_moves(stm)) == 0)
-    except Exception:
-        pass
+    except (AttributeError, TypeError, ValueError) as exc:
+        out["check"] = False
+        out["checkmate"] = False
+        LOGGER.warning("snapshot_check_flags_fallback", extra={"error": str(exc)})
 
     # FEN convenience
     try:
         from ..fen import game_to_fen  # lazy import
         out["fen"] = game_to_fen(game)
-    except Exception:
-        pass
+    except (ImportError, AttributeError, TypeError, ValueError) as exc:
+        out["fen"] = None
+        LOGGER.warning("snapshot_fen_fallback", extra={"error": str(exc)})
 
     # Arcane layer (if present)
     if hasattr(game, "player_config"):
