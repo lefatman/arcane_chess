@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import sys
 import threading
 import unittest
@@ -31,6 +32,16 @@ def _load_frontend_server_module():
 
 
 class TestIllegalInputRejected(unittest.TestCase):
+    def _start_server(self, server_module):
+        server_module.STATE.engine = server_module.ServerEngine.standard_demo_game()
+        server_module.STATE.pending = None
+        server_module.STATE.pending_move = None
+
+        httpd = server_module.ThreadingHTTPServer(("127.0.0.1", 0), server_module.Handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        return httpd, thread
+
     def test_push_rejects_opposite_color_piece(self):
         g = Game()
         setup_standard(g)
@@ -64,13 +75,7 @@ class TestIllegalInputRejected(unittest.TestCase):
 
     def test_api_apply_returns_400_for_illegal_input(self):
         server_module = _load_frontend_server_module()
-        server_module.STATE.engine = server_module.ServerEngine.standard_demo_game()
-        server_module.STATE.pending = None
-        server_module.STATE.pending_move = None
-
-        httpd = server_module.ThreadingHTTPServer(("127.0.0.1", 0), server_module.Handler)
-        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-        thread.start()
+        httpd, thread = self._start_server(server_module)
 
         try:
             url = f"http://127.0.0.1:{httpd.server_port}/api/apply"
@@ -84,6 +89,77 @@ class TestIllegalInputRejected(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError) as exc:
                 urllib.request.urlopen(req)
             self.assertEqual(exc.exception.code, 400)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=2)
+
+    def test_api_reset_rejects_oversized_payload_with_413(self):
+        server_module = _load_frontend_server_module()
+        old_limit = os.environ.get("ARCANE_HTTP_MAX")
+        os.environ["ARCANE_HTTP_MAX"] = "16"
+        httpd, thread = self._start_server(server_module)
+
+        try:
+            url = f"http://127.0.0.1:{httpd.server_port}/api/reset"
+            payload = json.dumps({"pad": "x" * 128}).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with self.assertRaises(urllib.error.HTTPError) as exc:
+                urllib.request.urlopen(req)
+            self.assertEqual(exc.exception.code, 413)
+        finally:
+            if old_limit is None:
+                os.environ.pop("ARCANE_HTTP_MAX", None)
+            else:
+                os.environ["ARCANE_HTTP_MAX"] = old_limit
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=2)
+
+    def test_api_reset_rejects_invalid_json_with_400(self):
+        server_module = _load_frontend_server_module()
+        httpd, thread = self._start_server(server_module)
+
+        try:
+            url = f"http://127.0.0.1:{httpd.server_port}/api/reset"
+            payload = b'{"broken": '
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with self.assertRaises(urllib.error.HTTPError) as exc:
+                urllib.request.urlopen(req)
+            self.assertEqual(exc.exception.code, 400)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=2)
+
+    def test_api_reset_accepts_normal_payload(self):
+        server_module = _load_frontend_server_module()
+        httpd, thread = self._start_server(server_module)
+
+        try:
+            url = f"http://127.0.0.1:{httpd.server_port}/api/reset"
+            payload = b"{}"
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req) as resp:
+                self.assertEqual(resp.status, 200)
+                body = json.loads(resp.read().decode("utf-8"))
+            self.assertTrue(body.get("ok"))
+            self.assertIn("state", body)
         finally:
             httpd.shutdown()
             httpd.server_close()

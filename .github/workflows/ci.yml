@@ -17,5 +17,7 @@ jobs:
           python-version: "3.11"
       - name: Run backend tests
         run: python backend/scripts/run_tests.py
+      - name: Negative API tests
+        run: PYTHONPATH=backend python -m unittest backend.tests.test_illegal_input_rejected
       - name: API concurrency stress
         run: python frontend/scripts/concurrency_stress.py --seed 1337 --rounds 40 --apply-workers 3 --undo-workers 3

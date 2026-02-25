@@ -22,6 +22,7 @@ import argparse
 from dataclasses import fields, is_dataclass
 import json
 import os
+import socket
 import sys
 import threading
 from http import HTTPStatus
@@ -48,8 +49,46 @@ from arcane_interaction_chess.arcane.decisions import DecisionProvider
 from arcane_interaction_chess.core.types import Color
 
 
-def _json_read(rfile, max_bytes: int = 1_000_000) -> Dict[str, Any]:
-    raw = rfile.read(int(os.environ.get("ARCANE_HTTP_MAX", max_bytes)))
+class PayloadTooLargeError(ValueError):
+    pass
+
+
+class RequestReadTimeoutError(ValueError):
+    pass
+
+
+def _json_read(
+    rfile,
+    *,
+    content_length: Optional[int],
+    max_bytes: int = 1_000_000,
+    socket_obj: Optional[socket.socket] = None,
+    read_timeout_s: Optional[float] = None,
+) -> Dict[str, Any]:
+    if content_length is None:
+        raise ValueError("Missing Content-Length")
+
+    max_allowed = int(os.environ.get("ARCANE_HTTP_MAX", str(max_bytes)))
+    if content_length < 0:
+        raise ValueError("Invalid Content-Length")
+    if content_length > max_allowed:
+        raise PayloadTooLargeError("Payload too large")
+
+    prev_timeout = None
+    if socket_obj is not None and read_timeout_s is not None:
+        prev_timeout = socket_obj.gettimeout()
+        socket_obj.settimeout(read_timeout_s)
+
+    try:
+        raw = rfile.read(content_length) if content_length > 0 else b""
+    except TimeoutError as e:
+        raise RequestReadTimeoutError("Request body read timed out") from e
+    except socket.timeout as e:
+        raise RequestReadTimeoutError("Request body read timed out") from e
+    finally:
+        if socket_obj is not None and read_timeout_s is not None:
+            socket_obj.settimeout(prev_timeout)
+
     if not raw:
         return {}
     try:
@@ -467,10 +506,33 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_error(HTTPStatus.NOT_FOUND, "No such endpoint")
 
     def _handle_api_post(self) -> None:
-        length = int(self.headers.get("Content-Length", "0") or "0")
-        raw = self.rfile.read(length) if length > 0 else b""
         try:
-            body = json.loads(raw.decode("utf-8")) if raw else {}
+            length_header = self.headers.get("Content-Length")
+            length = int(length_header) if length_header is not None else None
+        except (TypeError, ValueError):
+            _bad(self, "Invalid Content-Length", 400)
+            return
+
+        try:
+            body = _json_read(
+                self.rfile,
+                content_length=length,
+                socket_obj=self.connection,
+                read_timeout_s=float(os.environ.get("ARCANE_HTTP_READ_TIMEOUT", "5.0")),
+            )
+        except PayloadTooLargeError as e:
+            _bad(self, str(e), 413)
+            return
+        except RequestReadTimeoutError as e:
+            _bad(self, str(e), 408)
+            return
+        except ValueError as e:
+            msg = str(e)
+            if msg == "Missing Content-Length":
+                _bad(self, msg, 411)
+            else:
+                _bad(self, msg, 400)
+            return
         except Exception as e:
             _bad(self, f"Invalid JSON: {e}")
             return
