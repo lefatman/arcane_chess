@@ -1,0 +1,8 @@
+[project]
+name = "arcane-interaction-chess"
+version = "0.1.0"
+description = "Interaction-driven chess engine with Arcane elements/items/abilities"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 100

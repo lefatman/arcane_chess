@@ -1,0 +1,162 @@
+:root{
+  --bg:#0b0f14;
+  --panel:#0f1620;
+  --panel2:#121c29;
+  --text:#e8eef6;
+  --muted:#a4b3c7;
+  --line:#223047;
+  --accent:#7dd3fc;
+  --accent2:#a78bfa;
+  --danger:#fb7185;
+  --ok:#34d399;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  background: radial-gradient(1200px 600px at 20% 0%, rgba(125,211,252,.12), transparent 60%),
+              radial-gradient(900px 500px at 100% 40%, rgba(167,139,250,.12), transparent 55%),
+              var(--bg);
+  color:var(--text);
+  font-family:var(--sans);
+}
+#app{height:100%; display:flex; flex-direction:column}
+.topbar{
+  display:flex; justify-content:space-between; align-items:center;
+  padding:12px 16px; border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg, rgba(255,255,255,.02), transparent);
+}
+.brand{display:flex; gap:12px; align-items:center}
+.logo{width:34px; height:34px; border-radius:10px;
+  background: linear-gradient(135deg, rgba(125,211,252,.8), rgba(167,139,250,.8));
+  box-shadow: 0 0 0 1px rgba(255,255,255,.08) inset, 0 10px 24px rgba(0,0,0,.35);
+}
+.title{font-weight:700; letter-spacing:.3px}
+.subtitle{font-size:12px; color:var(--muted)}
+.topbar-actions{display:flex; gap:8px}
+
+.layout{flex:1; display:grid; grid-template-columns: 1fr 380px; gap:12px; padding:12px}
+.boardPane{position:relative; border-radius:14px; overflow:hidden; border:1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255,255,255,.03), transparent);
+}
+#board{width:100%; height:100%; display:block}
+.toast{
+  position:absolute; left:12px; bottom:12px;
+  background: rgba(15,22,32,.92);
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:12px;
+  padding:10px 12px;
+  font-size:12px;
+  color:var(--text);
+  box-shadow:0 14px 30px rgba(0,0,0,.35);
+}
+
+.sidePane{display:flex; flex-direction:column; gap:12px}
+.panel{
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:12px;
+  background: linear-gradient(180deg, rgba(255,255,255,.03), transparent);
+}
+.panelTitle{font-weight:700; margin-bottom:8px}
+.kv{display:grid; grid-template-columns:120px 1fr; gap:6px 10px; font-size:12px; color:var(--muted)}
+.mono{font-family:var(--mono)}
+.tiny{font-size:11px; line-height:1.2}
+
+.btn{
+  border:1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.05);
+  color:var(--text);
+  padding:8px 10px;
+  border-radius:12px;
+  cursor:pointer;
+  font-size:13px;
+}
+.btn:hover{background: rgba(255,255,255,.08)}
+.btn:active{transform: translateY(1px)}
+.btn-primary{background: rgba(125,211,252,.18); border-color: rgba(125,211,252,.35)}
+.btn-primary:hover{background: rgba(125,211,252,.24)}
+.btn-ghost{background: transparent}
+
+.select,.input{
+  width:100%;
+  background: rgba(0,0,0,.25);
+  color: var(--text);
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.moves{max-height:220px; overflow:auto; font-size:12px; color:var(--muted)}
+.moves .row{display:flex; gap:8px; padding:4px 0; border-bottom:1px dashed rgba(255,255,255,.06)}
+.moves .ply{width:32px; color:rgba(255,255,255,.35)}
+.moves .san{color:var(--text)}
+
+.effects{max-height:160px; overflow:auto; font-size:12px; color:var(--muted)}
+.effects .e{padding:6px 8px; border:1px solid rgba(255,255,255,.07); border-radius:12px; margin-bottom:6px;
+  background: rgba(0,0,0,.18);
+}
+.effects .tag{display:inline-block; padding:2px 6px; border-radius:999px; margin-right:6px;
+  font-size:11px; color:var(--text);
+  border:1px solid rgba(255,255,255,.08);
+}
+.effects .tag.off{background: rgba(167,139,250,.20); border-color: rgba(167,139,250,.35)}
+.effects .tag.def{background: rgba(125,211,252,.18); border-color: rgba(125,211,252,.35)}
+.effects .tag.item{background: rgba(52,211,153,.18); border-color: rgba(52,211,153,.32)}
+.effects .tag.warn{background: rgba(251,113,133,.15); border-color: rgba(251,113,133,.30)}
+
+.muted{color:var(--muted)}
+
+.modal{
+  position:fixed; inset:0;
+  background: rgba(0,0,0,.55);
+  display:flex; align-items:center; justify-content:center;
+  padding:18px;
+}
+.modalCard{
+  width:min(1100px, 100%);
+  border-radius:16px;
+  border:1px solid rgba(255,255,255,.10);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+  box-shadow: 0 30px 60px rgba(0,0,0,.45);
+  overflow:hidden;
+}
+
+.decisionCard{width:min(760px, 100%)}
+.decisionOptions{display:grid; gap:8px; margin-top:12px; max-height:360px; overflow:auto}
+.decisionOptions .opt{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  padding:10px 10px;
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.08);
+  background: rgba(0,0,0,.18);
+}
+.decisionOptions .opt .label{font-size:13px; color:var(--text)}
+.decisionOptions .opt .meta{font-size:11px; color:var(--muted); font-family:var(--mono)}
+.decisionOptions .opt button{white-space:nowrap}
+.modalHeader{display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-bottom:1px solid rgba(255,255,255,.08)}
+.modalTitle{font-weight:800}
+.modalSubtitle{font-size:12px; color:var(--muted)}
+.modalBody{padding:14px}
+
+.loadouts{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+.loadout{border:1px solid rgba(255,255,255,.08); border-radius:14px; background: rgba(0,0,0,.18); padding:12px}
+.loadoutTitle{font-weight:700; margin-bottom:10px}
+
+.loadoutGrid{display:grid; grid-template-columns: 160px 1fr; gap:10px}
+.loadoutGrid .group{border:1px solid rgba(255,255,255,.06); border-radius:12px; padding:10px}
+.loadoutGrid .groupTitle{font-weight:700; font-size:12px; color:var(--text); margin-bottom:6px}
+.loadoutGrid label{display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); margin:6px 0}
+.loadoutGrid input[type="checkbox"]{transform: translateY(1px)}
+
+.modalFooter{display:flex; justify-content:space-between; align-items:center; margin-top:12px; padding-top:12px; border-top:1px solid rgba(255,255,255,.08)}
+.modalFooter .hint{font-size:12px; color:var(--muted)}
+.modalFooter .actions{display:flex; align-items:center; gap:8px}
+
+@media (max-width: 980px){
+  .layout{grid-template-columns:1fr}
+  .sidePane{order:2}
+  .loadouts{grid-template-columns:1fr}
+}

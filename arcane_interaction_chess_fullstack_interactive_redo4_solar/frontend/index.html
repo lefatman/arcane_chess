@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Arcane Interaction Chess</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo"></div>
+        <div>
+          <div class="title">Arcane Interaction Chess</div>
+          <div class="subtitle">procedural 2.5D • no sprites • deterministic backend</div>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button id="btnNewGame" class="btn">New game</button>
+        <button id="btnSolar" class="btn">Solar</button>
+        <button id="btnUndo" class="btn">Undo</button>
+        <button id="btnReset" class="btn btn-ghost">Reset</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="boardPane">
+        <canvas id="board" width="1200" height="760"></canvas>
+        <div class="toast" id="toast" hidden></div>
+      </section>
+
+      <aside class="sidePane">
+        <div class="panel">
+          <div class="panelTitle">Match</div>
+          <div class="kv">
+            <div>Turn</div>
+            <div id="turn">—</div>
+            <div>Check</div>
+            <div id="check">—</div>
+            <div>FEN</div>
+            <div id="fen" class="mono tiny">—</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panelTitle">Arcane</div>
+          <div id="arcane" class="tiny mono"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panelTitle">Effects</div>
+          <div id="effects" class="effects"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panelTitle">Moves</div>
+          <div id="moves" class="moves mono"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panelTitle">Performance</div>
+          <div class="kv">
+            <div>FPS</div>
+            <div id="fps">—</div>
+            <div>Quality</div>
+            <div>
+              <select id="quality" class="select">
+                <option value="0">Fast</option>
+                <option value="1" selected>Balanced</option>
+                <option value="2">Pretty</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <!-- New game modal -->
+    <div id="modal" class="modal" hidden>
+      <div class="modalCard">
+        <div class="modalHeader">
+          <div>
+            <div class="modalTitle">New game</div>
+            <div class="modalSubtitle">Configure elements, items, and abilities (validated by backend)</div>
+          </div>
+          <button id="btnCloseModal" class="btn btn-ghost">Close</button>
+        </div>
+
+        <div class="modalBody">
+          <div class="loadouts">
+            <div class="loadout" id="loadoutWhite">
+              <div class="loadoutTitle">White</div>
+              <div class="loadoutGrid" data-color="WHITE"></div>
+            </div>
+
+            <div class="loadout" id="loadoutBlack">
+              <div class="loadoutTitle">Black</div>
+              <div class="loadoutGrid" data-color="BLACK"></div>
+            </div>
+          </div>
+
+          <div class="modalFooter">
+            <div class="hint">Tip: piece-type targeting requires Lightning <span class="muted">or</span> Multitasker’s Schedule.</div>
+            <div class="actions">
+              <input id="rngSeed" class="input mono" value="1337" />
+              <button id="btnStart" class="btn btn-primary">Start</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Arcane decision modal -->
+    <div id="decisionModal" class="modal" hidden>
+      <div class="modalCard decisionCard">
+        <div class="modalHeader">
+          <div>
+            <div class="modalTitle">Decision</div>
+            <div id="decisionPrompt" class="modalSubtitle"></div>
+          </div>
+          <button id="btnDecisionCancel" class="btn btn-ghost">Cancel</button>
+        </div>
+        <div class="modalBody">
+          <div id="decisionContext" class="tiny mono muted" style="white-space:pre-wrap"></div>
+          <div id="decisionOptions" class="decisionOptions"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Solar Necklace modal -->
+    <div id="solarModal" class="modal" hidden>
+      <div class="modalCard decisionCard">
+        <div class="modalHeader">
+          <div>
+            <div class="modalTitle">Solar Necklace</div>
+            <div id="solarPrompt" class="modalSubtitle">Top up a consumable ability</div>
+          </div>
+          <button id="btnSolarClose" class="btn btn-ghost">Close</button>
+        </div>
+        <div class="modalBody">
+          <div id="solarContext" class="tiny mono muted" style="white-space:pre-wrap"></div>
+          <div id="solarOptions" class="decisionOptions"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
