@@ -49,22 +49,40 @@ def parse_fen(fen: str) -> Game:
     if len(ranks) != 8:
         raise ValueError("FEN placement must have 8 ranks")
 
+    white_kings = 0
+    black_kings = 0
+
     for rank_idx, row in enumerate(ranks):
         r = 7 - rank_idx
         f = 0
         for ch in row:
             if ch.isdigit():
-                f += int(ch)
+                gap = int(ch)
+                if gap < 1 or gap > 8:
+                    raise ValueError("Bad empty-square run in FEN")
+                f += gap
+                if f > 8:
+                    raise ValueError("Bad rank width in FEN")
                 continue
+            if f >= 8:
+                raise ValueError("Bad rank width in FEN")
             color = Color.WHITE if ch.isupper() else Color.BLACK
             kind = _CHAR_TO_PIECE.get(ch.lower())
             if kind is None:
                 raise ValueError(f"Unknown piece char: {ch}")
             pos = sq(f, r)
             g.board.add_piece(kind(color, pos))  # type: ignore[misc]
+            if kind is King:
+                if color is Color.WHITE:
+                    white_kings += 1
+                else:
+                    black_kings += 1
             f += 1
         if f != 8:
             raise ValueError("Bad rank width in FEN")
+
+    if white_kings != 1 or black_kings != 1:
+        raise ValueError("FEN must contain exactly one king per side")
 
     if stm == "w":
         g.side_to_move = Color.WHITE
@@ -91,6 +109,26 @@ def parse_fen(fen: str) -> Game:
 
     if castling == "-":
         castling = ""
+    else:
+        seen = set()
+        for flag in castling:
+            if flag not in "KQkq":
+                raise ValueError("Bad castling rights in FEN")
+            if flag in seen:
+                raise ValueError("Bad castling rights in FEN")
+            seen.add(flag)
+
+    def _expect(piece, piece_type, color: Color) -> bool:
+        return isinstance(piece, piece_type) and piece.color is color
+
+    if "K" in castling and not (_expect(wk, King, Color.WHITE) and _expect(wrh, Rook, Color.WHITE)):
+        raise ValueError("Bad castling rights in FEN")
+    if "Q" in castling and not (_expect(wk, King, Color.WHITE) and _expect(wra, Rook, Color.WHITE)):
+        raise ValueError("Bad castling rights in FEN")
+    if "k" in castling and not (_expect(bk, King, Color.BLACK) and _expect(brh, Rook, Color.BLACK)):
+        raise ValueError("Bad castling rights in FEN")
+    if "q" in castling and not (_expect(bk, King, Color.BLACK) and _expect(bra, Rook, Color.BLACK)):
+        raise ValueError("Bad castling rights in FEN")
 
     def _set_if(piece, allowed: bool):
         if piece is not None:
@@ -106,18 +144,36 @@ def parse_fen(fen: str) -> Game:
     # En passant: synthesize last move as a double pawn push, so EP generation works.
     if ep != "-" and ep:
         ep_sq = _alg_to_sq(ep)
+        ep_rank = rank_of(ep_sq)
         if g.side_to_move is Color.WHITE:
+            if ep_rank != 5:
+                raise ValueError("Bad en-passant square in FEN")
             # black moved last; pawn is one rank below ep square
             to_sq = ep_sq - 8
             from_sq = to_sq + 16
+            expected_color = Color.BLACK
         else:
+            if ep_rank != 2:
+                raise ValueError("Bad en-passant square in FEN")
             # white moved last
             to_sq = ep_sq + 8
             from_sq = to_sq - 16
+            expected_color = Color.WHITE
+
+        if not (0 <= from_sq < 64 and 0 <= to_sq < 64):
+            raise ValueError("Bad en-passant square in FEN")
+
+        if g.board.piece_at(ep_sq) is not None:
+            raise ValueError("Bad en-passant square in FEN")
+
+        if g.board.piece_at(from_sq) is not None:
+            raise ValueError("Bad en-passant square in FEN")
 
         pawn = g.board.piece_at(to_sq)
-        if isinstance(pawn, Pawn):
-            g.last_move = NormalMove(from_sq=from_sq, to_sq=to_sq, flags=("double_pawn_push",))
+        if not isinstance(pawn, Pawn) or pawn.color is not expected_color:
+            raise ValueError("Bad en-passant square in FEN")
+
+        g.last_move = NormalMove(from_sq=from_sq, to_sq=to_sq, flags=("double_pawn_push",))
 
     return g
 
