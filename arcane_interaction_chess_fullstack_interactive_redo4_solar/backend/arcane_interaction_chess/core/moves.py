@@ -7,6 +7,9 @@ if TYPE_CHECKING:
     from .game import Game
     from .piece import Piece
 
+
+ChangedPieceState = Tuple["Piece", int, bool, int]
+
 @dataclass(frozen=True)
 class Move:
     from_sq: int
@@ -31,7 +34,7 @@ class NormalMove(Move):
         undo.mover = moved
         undo.captured_piece = captured
 
-        undo.changed.append((moved, moved.pos, moved.has_moved))
+        undo.changed.append((moved, moved.pos, moved.has_moved, self.to_sq))
         if captured is not None:
             undo.captured.append((captured, captured.pos, captured.has_moved))
             board.remove_piece(captured.pos)
@@ -59,7 +62,7 @@ class EnPassantMove(Move):
         undo.mover = moved
         undo.captured_piece = captured
 
-        undo.changed.append((moved, moved.pos, moved.has_moved))
+        undo.changed.append((moved, moved.pos, moved.has_moved, self.to_sq))
         undo.captured.append((captured, captured.pos, captured.has_moved))
 
         board.remove_piece(self.captured_sq)
@@ -87,8 +90,8 @@ class CastleMove(Move):
         undo.mover = king
         undo.captured_piece = None
 
-        undo.changed.append((king, king.pos, king.has_moved))
-        undo.changed.append((rook, rook.pos, rook.has_moved))
+        undo.changed.append((king, king.pos, king.has_moved, self.to_sq))
+        undo.changed.append((rook, rook.pos, rook.has_moved, self.rook_to))
 
         board.move_piece(self.from_sq, self.to_sq)
         board.move_piece(self.rook_from, self.rook_to)
@@ -147,7 +150,7 @@ class Undo:
     mover: Optional["Piece"] = None
     captured_piece: Optional["Piece"] = None
 
-    changed: List[Tuple["Piece", int, bool]] = None
+    changed: List[ChangedPieceState] = None
     captured: List[Tuple["Piece", int, bool]] = None
     removed: List[Tuple["Piece", int, bool]] = None
     added: List["Piece"] = None

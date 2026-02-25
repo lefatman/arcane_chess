@@ -1,0 +1,10 @@
+{
+  "perft": {
+    "nodes_per_sec_min": 5000,
+    "peak_alloc_bytes_max": 20000000
+  },
+  "search": {
+    "searches_per_sec_min": 5,
+    "peak_alloc_bytes_max": 30000000
+  }
+}

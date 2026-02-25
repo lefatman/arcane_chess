@@ -104,8 +104,7 @@ class Game:
         return True
 
     def push_checked(self, move: Move) -> None:
-        legal = self.legal_moves(self.side_to_move)
-        for candidate in legal:
+        for candidate in self.legal_moves_iter(self.side_to_move):
             if self.moves_equal(candidate, move):
                 self.push(candidate)
                 return
@@ -131,18 +130,15 @@ class Game:
             p.has_moved = hm
             self.board._pieces[pos] = p
 
-        # restore captured pieces
-        for p, pos, hm in undo.captured:
+        # restore moved pieces
+        for p, pos, hm, current_sq in undo.changed:
+            self.board._pieces.pop(current_sq, None)
             p.pos = pos
             p.has_moved = hm
             self.board._pieces[pos] = p
 
-        # restore moved pieces
-        for p, pos, hm in undo.changed:
-            for k, v in list(self.board._pieces.items()):
-                if v is p and k != pos:
-                    self.board._pieces.pop(k, None)
-                    break
+        # restore captured pieces
+        for p, pos, hm in undo.captured:
             p.pos = pos
             p.has_moved = hm
             self.board._pieces[pos] = p
@@ -176,13 +172,10 @@ class Game:
             self.board.remove_piece(p.pos)
         for p, pos, hm in undo.removed:
             p.pos = pos; p.has_moved = hm; self.board._pieces[pos] = p
-        for p, pos, hm in undo.captured:
+        for p, pos, hm, current_sq in undo.changed:
+            self.board._pieces.pop(current_sq, None)
             p.pos = pos; p.has_moved = hm; self.board._pieces[pos] = p
-        for p, pos, hm in undo.changed:
-            for k, v in list(self.board._pieces.items()):
-                if v is p and k != pos:
-                    self.board._pieces.pop(k, None)
-                    break
+        for p, pos, hm in undo.captured:
             p.pos = pos; p.has_moved = hm; self.board._pieces[pos] = p
         for p, meta in undo.piece_meta_snapshots:
             p.meta = meta
@@ -194,18 +187,21 @@ class Game:
         return out
 
     def pseudo_legal_moves(self, color: Color) -> Iterable[Move]:
-        for p in self.board.pieces_of(color):
+        for p in self.board.iter_pieces_of(color):
             yield from p.pseudo_legal_moves(self)
 
+    def legal_moves_iter(self, color: Color) -> Iterable[Move]:
+        return self.apply_rules(color, self.pseudo_legal_moves(color))
+
     def legal_moves(self, color: Color) -> List[Move]:
-        return list(self.apply_rules(color, self.pseudo_legal_moves(color)))
+        return list(self.legal_moves_iter(color))
 
     def is_square_attacked(self, target: int, by_color: Color) -> bool:
         if self.tracker is not None:
             bb = self.tracker.attacked_bb(self, by_color)
             return ((bb >> target) & 1) == 1
 
-        for p in self.board.pieces_of(by_color):
+        for p in self.board.iter_pieces_of(by_color):
             for a in p.attacks(self):
                 if a == target:
                     return True

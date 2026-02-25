@@ -13,9 +13,9 @@ def perft(game: Game, depth: int) -> int:
     """
     if depth <= 0:
         return 1
-    moves = game.legal_moves(game.side_to_move)
+    moves = game.legal_moves_iter(game.side_to_move)
     if depth == 1:
-        return len(moves)
+        return sum(1 for _ in moves)
     total = 0
     for m in moves:
         game.push_quiet(m)
@@ -27,7 +27,7 @@ def perft(game: Game, depth: int) -> int:
 def perft_divide(game: Game, depth: int) -> Dict[str, int]:
     """Divide perft: nodes per root move."""
     out: Dict[str, int] = {}
-    for m in game.legal_moves(game.side_to_move):
+    for m in game.legal_moves_iter(game.side_to_move):
         game.push_quiet(m)
         out[move_to_uci(m)] = perft(game, depth - 1)
         game.pop_quiet()

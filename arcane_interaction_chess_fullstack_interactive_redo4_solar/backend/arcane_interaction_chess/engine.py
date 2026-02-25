@@ -56,7 +56,7 @@ class Engine:
         best: Optional[Move] = None
         best_val = -10**18
 
-        moves = game.legal_moves(game.side_to_move)
+        moves = list(game.legal_moves_iter(game.side_to_move))
         if not moves:
             return None
 
@@ -115,7 +115,7 @@ class Engine:
                 if alpha >= beta:
                     return ent.value
 
-        moves = game.legal_moves(game.side_to_move)
+        moves = list(game.legal_moves_iter(game.side_to_move))
         if depth <= 0 or not moves:
             # terminal / leaf
             if not moves:

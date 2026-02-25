@@ -27,7 +27,7 @@ class RemoteCaptureMove(Move):
         undo.captured_piece = None
 
         # mark this piece as having moved (it's an action)
-        undo.changed.append((mover, mover.pos, mover.has_moved))
+        undo.changed.append((mover, mover.pos, mover.has_moved, mover.pos))
         mover.has_moved = True
 
         if target is not None and target.color != mover.color:
