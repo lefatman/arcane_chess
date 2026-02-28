@@ -42,34 +42,43 @@ export class PromotionPicker {
     this._onCancel = onCancel || null;
     this.optionsEl.innerHTML = "";
 
-    const sorted = [...moves].sort((a, b) => {
-      const pa = promotionRank(a);
-      const pb = promotionRank(b);
-      if (pa !== pb) return pa - pb;
-      return String(getLabel ? getLabel(a) : "").localeCompare(String(getLabel ? getLabel(b) : ""));
+    const entries = [];
+    for (let i = 0; i < moves.length; i += 1) {
+      const move = moves[i];
+      const fallback = getLabel ? String(getLabel(move)) : "Choose";
+      const promo = normalizedPromotion(move);
+      const variantTag = `variant ${i + 1}`;
+      const meta = promo ? `${fallback} • ${variantTag}` : `${fallback} • ${variantTag}`;
+      entries.push({
+        idx: i,
+        move,
+        rank: promotionRank(move),
+        label: promo || fallback,
+        meta,
+      });
+    }
+    entries.sort((a, b) => {
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      return a.idx - b.idx;
     });
 
-    for (const move of sorted) {
+    for (const entry of entries) {
       const row = document.createElement("div");
       row.className = "opt";
-      const promo = normalizedPromotion(move);
-      const fallback = getLabel ? getLabel(move) : "Choose";
-      const label = promo || fallback;
-      const meta = promo ? fallback : "";
-      row.innerHTML = `<div><div class="label">${esc(label)}</div><div class="meta">${esc(meta)}</div></div>`;
+      row.innerHTML = `<div><div class="label">${esc(entry.label)}</div><div class="meta">${esc(entry.meta)}</div></div>`;
 
       const btn = document.createElement("button");
       btn.className = "btn btn-primary";
       btn.textContent = "Select";
       btn.addEventListener("click", () => {
-        if (this._onPick) this._onPick(move);
+        if (this._onPick) this._onPick(entry.move);
         this.hide();
       });
       row.appendChild(btn);
       this.optionsEl.appendChild(row);
     }
 
-    this.promptEl.textContent = "Choose move variant";
+    this.promptEl.textContent = entries.length && entries[0].rank < PROMOTION_ORDER.length ? "Choose promotion" : "Choose move variant";
     this.modal.hidden = false;
   }
 
