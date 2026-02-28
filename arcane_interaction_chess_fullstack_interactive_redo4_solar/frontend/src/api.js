@@ -27,7 +27,7 @@ export class ApiClient {
 
   apply(moveDict) { return this._post("/api/apply", { move: moveDict }); }
   decide(id, choice) { return this._post("/api/decide", { id, choice }); }
-  pending() { return this._get("/api/pending").then(x => x.pending); }
+  pending() { return this._get("/api/pending"); }
   cancel() { return this._post("/api/cancel", {}).then(x => x.state); }
   undo() { return this._post("/api/undo", {}).then(x => x.result); }
   reset() { return this._post("/api/reset", {}).then(x => x.state); }
