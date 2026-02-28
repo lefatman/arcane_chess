@@ -197,7 +197,7 @@ def snapshot(game) -> Dict[str, Any]:
     # Arcane layer (if present)
     if hasattr(game, "player_config"):
         cfg = game.player_config
-        out["arcane"] = {
+        cfg_payload = {
             "WHITE": {
                 "element": getattr(cfg[Color.WHITE].element, "name", str(cfg[Color.WHITE].element)),
                 "element_id": int(cfg[Color.WHITE].element.value),
@@ -217,6 +217,10 @@ def snapshot(game) -> Dict[str, Any]:
                 ],
             },
         }
+        # Canonical key used by UI.
+        out["player_config"] = cfg_payload
+        # Temporary compatibility alias for older clients.
+        out["arcane"] = cfg_payload
 
     if hasattr(game, "arcane_state"):
         st = game.arcane_state
