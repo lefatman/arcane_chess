@@ -50,6 +50,9 @@ export class LoadoutModal {
       this._updateBudgets(color);
     });
     gEl.appendChild(sel);
+    this._elementControl = this._elementControl || {};
+    this._elementControl[color] = { sel, reason: el("div", "tiny muted", "") };
+    gEl.appendChild(this._elementControl[color].reason);
 
     // Items
     const gItems = el("div", "group");
@@ -62,12 +65,18 @@ export class LoadoutModal {
       cb.addEventListener("change", () => {
         if (cb.checked) this.state[color].items.add(it.id);
         else this.state[color].items.delete(it.id);
+        this._applyItemConflicts(color, it.id, cb.checked);
         this._updateAbilityControls(color);
         this._updateBudgets(color);
       });
       row.appendChild(cb);
       row.appendChild(el("span", null, `${it.name} (cost ${it.slot_cost})`));
+      const reason = el("div", "tiny muted", "");
+      row.appendChild(reason);
       gItems.appendChild(row);
+
+      this._itemControls = this._itemControls || { WHITE: new Map(), BLACK: new Map() };
+      this._itemControls[color].set(it.id, { cb, reason });
     }
     this._itemsBudgetEl = this._itemsBudgetEl || {};
     this._itemsBudgetEl[color] = el("div", "tiny muted", "");
@@ -175,8 +184,7 @@ export class LoadoutModal {
   }
 
   _updateAbilityControls(color) {
-    const elId = this.state[color].element_id;
-    const allowPieceType = (elId === 4) || this._hasItem(color, 1); // Lightning or Multitasker
+    const allowPieceType = this._isLightningSelected(color) || this._hasItem(color, 1); // Lightning or Multitasker
 
     for (const c of this._abilControls[color]) {
       c.psel.disabled = !allowPieceType;
@@ -188,8 +196,97 @@ export class LoadoutModal {
       }
     }
 
-    // mutual exclusion: Multitasker vs Lightning
-    // (still let user select, backend will hard-fail; but we can hint)
+    this._syncConflictControls(color);
+  }
+
+  _setItemChecked(color, itemId, checked) {
+    if (checked) this.state[color].items.add(itemId);
+    else this.state[color].items.delete(itemId);
+    const ctl = this._itemControls?.[color]?.get(itemId);
+    if (ctl) ctl.cb.checked = checked;
+  }
+
+  _applyItemConflicts(color, itemId, checked) {
+    if (!checked) return;
+    if (itemId === 4) {
+      this._setItemChecked(color, 3, false);
+      this._setItemChecked(color, 5, false);
+      return;
+    }
+    if (itemId === 3) {
+      this._setItemChecked(color, 4, false);
+      this._setItemChecked(color, 5, false);
+      return;
+    }
+    if (itemId === 5) {
+      this._setItemChecked(color, 3, false);
+      this._setItemChecked(color, 4, false);
+      return;
+    }
+    if (itemId === 1 && this._isLightningSelected(color)) {
+      this._setItemChecked(color, 1, false);
+    }
+  }
+
+  _isLightningSelected(color) {
+    const elId = this.state[color].element_id;
+    const e = this.defs.elements.find((x) => x.id === elId);
+    return Boolean(e && String(e.name).toLowerCase().includes("lightning"));
+  }
+
+  _syncConflictControls(color) {
+    const dual = this._hasItem(color, 3);
+    const triple = this._hasItem(color, 4);
+    const ring = this._hasItem(color, 5);
+    const lightning = this._isLightningSelected(color);
+
+    if (lightning && this._hasItem(color, 1)) {
+      this._setItemChecked(color, 1, false);
+    }
+
+    const setItemState = (itemId, disabled, reason) => {
+      const ctl = this._itemControls?.[color]?.get(itemId);
+      if (!ctl) return;
+      ctl.cb.disabled = disabled;
+      ctl.reason.textContent = reason;
+      ctl.reason.style.display = reason ? "block" : "none";
+    };
+
+    setItemState(3, false, "");
+    setItemState(4, false, "");
+    setItemState(5, false, "");
+    setItemState(1, false, "");
+
+    if (triple) {
+      setItemState(3, true, "Disabled: conflicts with Triple Adept’s Gloves.");
+      setItemState(5, true, "Disabled: conflicts with Triple Adept’s Gloves.");
+    }
+    if (dual) {
+      setItemState(4, true, "Disabled: conflicts with Dual Adept’s Gloves.");
+      setItemState(5, true, "Disabled: conflicts with Dual Adept’s Gloves.");
+    }
+    if (ring) {
+      setItemState(3, true, "Disabled: conflicts with Headmaster Ring.");
+      setItemState(4, true, "Disabled: conflicts with Headmaster Ring.");
+    }
+
+    const elCtl = this._elementControl?.[color];
+    if (!elCtl) return;
+    const lightningOpt = Array.from(elCtl.sel.options).find((opt) => String(opt.textContent).toLowerCase().includes("lightning"));
+    if (lightningOpt) lightningOpt.disabled = this._hasItem(color, 1);
+
+    const multitaskerReason = lightning
+      ? "Disabled: conflicts with Lightning element."
+      : "";
+    if (multitaskerReason) {
+      setItemState(1, true, multitaskerReason);
+    }
+
+    const elReason = this._hasItem(color, 1)
+      ? "Lightning element is disabled while Multitasker’s Schedule is equipped."
+      : "";
+    elCtl.reason.textContent = elReason;
+    elCtl.reason.style.display = elReason ? "block" : "none";
   }
 
   getConfigs() {

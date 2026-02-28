@@ -563,11 +563,28 @@ class Handler(SimpleHTTPRequestHandler):
                 return
 
             if self.path.startswith("/api/newgame"):
-                white = _parse_config(body.get("white") or {})
-                black = _parse_config(body.get("black") or {})
-                seed = int(body.get("rng_seed", 1337))
+                try:
+                    white = _parse_config(body.get("white") or {})
+                except ValueError as e:
+                    _bad(self, f"Invalid white config: {e}", 400)
+                    return
+                try:
+                    black = _parse_config(body.get("black") or {})
+                except ValueError as e:
+                    _bad(self, f"Invalid black config: {e}", 400)
+                    return
+                try:
+                    seed = int(body.get("rng_seed", 1337))
+                except (TypeError, ValueError):
+                    _bad(self, "Invalid rng_seed: expected integer", 400)
+                    return
+                try:
+                    next_engine = ServerEngine(white=white, black=black, rng_seed=seed)
+                except ValueError as e:
+                    _bad(self, f"Invalid new game configuration: {e}", 400)
+                    return
                 with STATE_LOCK:
-                    STATE.engine = ServerEngine(white=white, black=black, rng_seed=seed)
+                    STATE.engine = next_engine
                     STATE.pending = None
                     STATE.pending_move = None
                     state = STATE.engine.state()
