@@ -5,6 +5,7 @@ import { HUD, findKingSq } from "./ui/hud.js";
 import { LoadoutModal } from "./ui/loadout.js";
 import { DecisionModal } from "./ui/decisions.js";
 import { SolarModal } from "./ui/solar.js";
+import { PromotionPicker } from "./ui/promotion_picker.js";
 
 const api = new ApiClient("");
 
@@ -29,9 +30,54 @@ const qualitySel = document.querySelector("#quality");
 
 const decisionModal = new DecisionModal(document);
 const solarModal = new SolarModal(document);
+const promotionPicker = new PromotionPicker(document);
 let decisionActive = false;
 let decisionHighlights = [];
 
+function hasDisambiguatedVariants(moves) {
+  if (!moves || moves.length <= 1) return false;
+  let kind = null;
+  let promoteTo = null;
+  for (const move of moves) {
+    const moveKind = move && move.kind != null ? String(move.kind) : "";
+    const movePromote = move && move.promote_to != null ? String(move.promote_to) : "";
+    if (moveKind === "promotion") return true;
+    if (kind == null) {
+      kind = moveKind;
+      promoteTo = movePromote;
+      continue;
+    }
+    if (kind !== moveKind || promoteTo !== movePromote) return true;
+  }
+  return false;
+}
+
+function moveChoiceLabel(move) {
+  const tags = [];
+  const kind = move && move.kind != null ? String(move.kind) : "";
+  const promoteTo = move && move.promote_to != null ? String(move.promote_to) : "";
+  if (kind) tags.push(kind.replace(/_/g, " "));
+  if (promoteTo) tags.push(`promote to ${promoteTo}`);
+  if (move && move.is_capture) tags.push("capture");
+  if (move && move.is_check) tags.push("check");
+  if (move && move.is_mate) tags.push("mate");
+  if (move && move.is_en_passant) tags.push("en passant");
+  if (move && move.is_castle_kingside) tags.push("castle kingside");
+  if (move && move.is_castle_queenside) tags.push("castle queenside");
+  if (move && move.uid != null) tags.push(`uid ${move.uid}`);
+  return tags.length ? tags.join(" • ") : "standard move";
+}
+
+async function pickMoveVariant(moves) {
+  if (!hasDisambiguatedVariants(moves)) return moves[0];
+  return new Promise((resolve) => {
+    promotionPicker.show(moves, {
+      getLabel: moveChoiceLabel,
+      onPick: (move) => resolve(move),
+      onCancel: () => resolve(null),
+    });
+  });
+}
 // Frontend state is sessionful: server-side pending decisions can outlive reloads.
 
 function pieceAtSq(snapshot, sq) {
@@ -315,7 +361,8 @@ canvas.addEventListener("mousedown", async (ev) => {
       renderer.clearSelection();
       return;
     }
-    const chosen = moves[0];
+    const chosen = await pickMoveVariant(moves);
+    if (!chosen) return;
 
     try {
       const resp = await api.apply(chosen);
