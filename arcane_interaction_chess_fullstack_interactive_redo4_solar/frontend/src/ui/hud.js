@@ -49,11 +49,11 @@ export class HUD {
 
     // arcane resources
     const as = snapshot.arcane_state;
-    const pc = snapshot.player_config;
+    const cfgBySide = snapshot.player_config;
     const lines = [];
-    if (pc) {
+    if (cfgBySide) {
       for (const side of ["WHITE","BLACK"]) {
-        const cfg = pc[side];
+        const cfg = cfgBySide[side];
         const el = cfg ? cfg.element : "?";
         const items = (cfg && cfg.items) ? cfg.items.join(",") : "";
         const abil = (cfg && cfg.abilities) ? cfg.abilities.map(a => a.piece_type ? `${a.ability}:${a.piece_type}` : String(a.ability)).join(",") : "";

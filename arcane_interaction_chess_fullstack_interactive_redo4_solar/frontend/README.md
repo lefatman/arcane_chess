@@ -40,3 +40,19 @@ Then open:
 > Note: the backend currently uses a default deterministic decision provider for arcane choices
 > (Block Path direction, Redo replay, etc.). The API surface is intentionally small so we can
 > add interactive decision prompts next.
+
+
+## Snapshot contract used by UI
+The UI reads these `GET /api/state` snapshot fields directly:
+
+- `side_to_move`: active side (`"WHITE"`/`"BLACK"`)
+- `pieces[]`: each piece uses `uid`, `color`, `type`, `pos`, `pos_alg`
+- `player_config`: per-side arcane loadout keyed by side (`WHITE`/`BLACK`)
+  - `element`, `element_id`, `items[]`, `abilities[]`
+- `arcane_state`: runtime arcane pools/charges
+  - `solar_uses`, `solar_max`, `necro_pool`, `necro_max`, `redo_charges`, `redo_max`, `graveyard`
+- `check`, `checkmate`, `fen`, `ply`
+
+Notes:
+- `player_config` is the canonical arcane config key for frontend readers.
+- The backend may also emit legacy `arcane` temporarily for backward compatibility; UI code should rely on `player_config`.

@@ -41,7 +41,8 @@ export class SolarModal {
     this._onClose = onClose || null;
 
     const stm = snapshot.side_to_move;
-    const pc = snapshot.player_config ? snapshot.player_config[stm] : null;
+    const cfgBySide = snapshot.player_config;
+    const pc = cfgBySide ? cfgBySide[stm] : null;
     const as = snapshot.arcane_state || null;
 
     if (!pc || !as) {

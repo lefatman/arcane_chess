@@ -59,12 +59,13 @@ function setDecision(pending) {
 
 function updateSolarButton() {
   const st = game.snapshot;
-  if (!st || !st.player_config || !st.arcane_state) {
+  const cfgBySide = st && st.player_config;
+  if (!cfgBySide || !st.arcane_state) {
     btnSolar.disabled = true;
     return;
   }
   const stm = st.side_to_move;
-  const cfg = st.player_config[stm];
+  const cfg = cfgBySide[stm];
   const uses = st.arcane_state.solar_uses ? Number(st.arcane_state.solar_uses[stm]) : 0;
   const hasSolar = (cfg && cfg.items) ? cfg.items.map(Number).includes(7) : false;
   btnSolar.disabled = !(hasSolar && uses > 0) || decisionActive || renderer.anim.busy();
