@@ -32,6 +32,10 @@ const solarModal = new SolarModal(document);
 let decisionActive = false;
 let decisionHighlights = [];
 
+function isLoadoutReady() {
+  return loadout != null;
+}
+
 // Frontend state is sessionful: server-side pending decisions can outlive reloads.
 
 function pieceAtSq(snapshot, sq) {
@@ -197,12 +201,23 @@ function showError(err) {
 }
 
 btnNewGame.addEventListener("click", () => {
+  if (!isLoadoutReady()) {
+    hud.toast("Loadout is still loading.");
+    return;
+  }
   loadout.show();
 });
 
-btnCloseModal.addEventListener("click", () => loadout.hide());
+btnCloseModal.addEventListener("click", () => {
+  if (!isLoadoutReady()) return;
+  loadout.hide();
+});
 
 btnStart.addEventListener("click", async () => {
+  if (!isLoadoutReady()) {
+    hud.toast("Loadout is still loading.");
+    return;
+  }
   try {
     clearDecision();
     const cfgs = loadout.getConfigs();
@@ -279,7 +294,8 @@ btnReset.addEventListener("click", async () => {
 });
 
 qualitySel.addEventListener("change", () => {
-  renderer.setQuality(parseInt(qualitySel.value, 10));
+  const nextQuality = parseInt(qualitySel.value, 10);
+  renderer.setQuality(Number.isFinite(nextQuality) ? nextQuality : 1);
 });
 
 updateDecisionLocks();
