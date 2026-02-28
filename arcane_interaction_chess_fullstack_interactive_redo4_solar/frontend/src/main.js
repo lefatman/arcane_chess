@@ -32,6 +32,8 @@ const solarModal = new SolarModal(document);
 let decisionActive = false;
 let decisionHighlights = [];
 
+// Frontend state is sessionful: server-side pending decisions can outlive reloads.
+
 function pieceAtSq(snapshot, sq) {
   if (!snapshot) return null;
   for (const p of snapshot.pieces) {
@@ -56,6 +58,11 @@ async function syncIntermediateState(snapshot) {
   updateSolarButton();
 }
 
+function updateDecisionLocks() {
+  btnUndo.disabled = decisionActive;
+  btnReset.disabled = decisionActive;
+}
+
 function setDecision(pending) {
   decisionActive = true;
   decisionHighlights = [];
@@ -65,6 +72,41 @@ function setDecision(pending) {
       if (o.to_sq != null) decisionHighlights.push(Number(o.to_sq));
     }
   }
+  updateDecisionLocks();
+}
+
+function clearDecision() {
+  decisionModal.hide();
+  decisionActive = false;
+  decisionHighlights = [];
+  updateDecisionLocks();
+}
+
+function openDecisionModal(pending) {
+  decisionModal.show(pending, {
+    onPick: async (choice) => {
+      try {
+        const r2 = await api.decide(pending.id, choice);
+        await handleServerResponse(r2);
+      } catch (e) {
+        showError(e);
+      }
+    },
+    onCancel: async () => {
+      try {
+        const st = await api.cancel();
+        clearDecision();
+        game.reset(st);
+        renderer.syncSnapshot(st);
+        await refreshLegal();
+        hud.render(game.snapshot, game);
+        updateSolarButton();
+        hud.toast("Decision cancelled.");
+      } catch (e) {
+        showError(e);
+      }
+    }
+  });
 }
 
 function updateSolarButton() {
@@ -93,39 +135,12 @@ async function handleServerResponse(resp) {
       hud.render(game.snapshot, game);
       updateSolarButton();
     }
-    decisionModal.show(resp.pending, {
-      onPick: async (choice) => {
-        try {
-          const r2 = await api.decide(resp.pending.id, choice);
-          await handleServerResponse(r2);
-        } catch (e) {
-          showError(e);
-        }
-      },
-      onCancel: async () => {
-        try {
-          const st = await api.cancel();
-          decisionModal.hide();
-          decisionActive = false;
-          decisionHighlights = [];
-          game.reset(st);
-          renderer.syncSnapshot(st);
-          await refreshLegal();
-          hud.render(game.snapshot, game);
-          updateSolarButton();
-          hud.toast("Decision cancelled.");
-        } catch (e) {
-          showError(e);
-        }
-      }
-    });
+    openDecisionModal(resp.pending);
     return;
   }
 
   if (resp.result) {
-    decisionModal.hide();
-    decisionActive = false;
-    decisionHighlights = [];
+    clearDecision();
 
     const res = resp.result;
     renderer.applyResult(res);
@@ -159,6 +174,21 @@ async function bootstrap() {
   await refreshLegal();
   hud.render(game.snapshot, game);
   updateSolarButton();
+
+  const pendingPayload = await api.pending();
+  const pending = pendingPayload && pendingPayload.pending ? pendingPayload.pending : pendingPayload;
+  const pendingState = pendingPayload && pendingPayload.state ? pendingPayload.state : (pending && pending.state ? pending.state : null);
+  if (!pending) return;
+  if (pendingState) {
+    await syncIntermediateState(pendingState);
+  }
+  setDecision(pending);
+  if (!pendingState) {
+    renderer.clearSelection();
+    hud.render(game.snapshot, game);
+    updateSolarButton();
+  }
+  openDecisionModal(pending);
 }
 
 function showError(err) {
@@ -174,9 +204,7 @@ btnCloseModal.addEventListener("click", () => loadout.hide());
 
 btnStart.addEventListener("click", async () => {
   try {
-    decisionModal.hide();
-    decisionActive = false;
-    decisionHighlights = [];
+    clearDecision();
     const cfgs = loadout.getConfigs();
     const seed = parseInt(rngSeedEl.value || "1337", 10);
     const st = await api.newGame(cfgs.WHITE, cfgs.BLACK, Number.isFinite(seed) ? seed : 1337);
@@ -220,13 +248,8 @@ btnSolar.addEventListener("click", async () => {
 
 btnUndo.addEventListener("click", async () => {
   if (renderer.anim.busy()) return;
+  if (decisionActive) return;
   try {
-    if (decisionActive) {
-      await api.cancel();
-      decisionModal.hide();
-      decisionActive = false;
-      decisionHighlights = [];
-    }
     const res = await api.undo();
     renderer.applyResult(res); // animate reverse-ish diff
     game.applyUndo(res);
@@ -240,13 +263,8 @@ btnUndo.addEventListener("click", async () => {
 
 btnReset.addEventListener("click", async () => {
   if (renderer.anim.busy()) return;
+  if (decisionActive) return;
   try {
-    if (decisionActive) {
-      await api.cancel();
-      decisionModal.hide();
-      decisionActive = false;
-      decisionHighlights = [];
-    }
     const st = await api.reset();
     game.reset(st);
     renderer.syncSnapshot(st);
@@ -263,6 +281,8 @@ btnReset.addEventListener("click", async () => {
 qualitySel.addEventListener("change", () => {
   renderer.setQuality(parseInt(qualitySel.value, 10));
 });
+
+updateDecisionLocks();
 
 // Canvas interaction
 canvas.addEventListener("mousedown", async (ev) => {
