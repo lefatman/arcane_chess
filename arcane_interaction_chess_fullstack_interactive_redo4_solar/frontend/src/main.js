@@ -46,6 +46,16 @@ async function refreshLegal() {
   renderer.setLegalMoves(moves);
 }
 
+async function syncIntermediateState(snapshot) {
+  if (!snapshot) return;
+  game.reset(snapshot);
+  renderer.syncSnapshot(snapshot);
+  renderer.clearSelection();
+  await refreshLegal();
+  hud.render(game.snapshot, game);
+  updateSolarButton();
+}
+
 function setDecision(pending) {
   decisionActive = true;
   decisionHighlights = [];
@@ -74,8 +84,15 @@ function updateSolarButton() {
 async function handleServerResponse(resp) {
   if (!resp) return;
   if (resp.pending) {
+    if (resp.state) {
+      await syncIntermediateState(resp.state);
+    }
     setDecision(resp.pending);
-    renderer.clearSelection();
+    if (!resp.state) {
+      renderer.clearSelection();
+      hud.render(game.snapshot, game);
+      updateSolarButton();
+    }
     decisionModal.show(resp.pending, {
       onPick: async (choice) => {
         try {
